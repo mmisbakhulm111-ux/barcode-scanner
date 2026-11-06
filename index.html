@@ -133,398 +133,412 @@
 
 <script>
 
-  // =====================================
-  // KONFIGURASI GOOGLE APPS SCRIPT
-  // =====================================
+// =====================================
+// KONFIGURASI GOOGLE APPS SCRIPT
+// =====================================
 
-  const API_URL =
-    'https://script.google.com/macros/s/AKfycbw3zh8VBi8QccfUzy_FsNzTpobIz9PvL_mhzQbxfY2SzzUN8pvr7OvpWQ3xXOwf2wrb/exec';
+const API_URL =
+  'https://script.google.com/macros/s/AKfycbw3zh8VBi8QccfUzy_FsNzTpobIz9PvL_mhzQbxfY2SzzUN8pvr7OvpWQ3xXOwf2wrb/exec';
 
-  const API_KEY =
-    'GANTI_DENGAN_TOKEN_RAHASIA_32_KARAKTER';
-
-
-  // =====================================
-  // VARIABEL
-  // =====================================
-
-  let scanner = null;
-  let kameraAktif = false;
-  let sedangMengirim = false;
-
-  let barcodeTerakhir = '';
-  let waktuScanTerakhir = 0;
-
-  let audioContext = null;
-
-  const input = document.getElementById('barcodeInput');
-  const statusBox = document.getElementById('status');
+const API_KEY =
+  'GANTI_DENGAN_TOKEN_RAHASIA_32_KARAKTER';
 
 
-  // =====================================
-  // SISTEM SUARA BEEP
-  // =====================================
+// =====================================
+// VARIABEL
+// =====================================
 
-  function siapkanAudio() {
+let scanner = null;
+let kameraAktif = false;
+let sedangMengirim = false;
 
-    const AudioContextClass =
-      window.AudioContext || window.webkitAudioContext;
+let barcodeTerakhir = '';
+let waktuScanTerakhir = 0;
 
-    if (!AudioContextClass) return;
+let audioContext = null;
 
-    if (!audioContext) {
-      audioContext = new AudioContextClass();
-    }
+const input = document.getElementById('barcodeInput');
+const statusBox = document.getElementById('status');
 
-    if (audioContext.state === 'suspended') {
-      audioContext.resume();
-    }
+
+// =====================================
+// SISTEM AUDIO
+// =====================================
+
+function siapkanAudio() {
+
+  const AudioContextClass =
+    window.AudioContext || window.webkitAudioContext;
+
+  if (!AudioContextClass) return;
+
+  if (!audioContext) {
+    audioContext = new AudioContextClass();
   }
 
+  if (audioContext.state === 'suspended') {
+    audioContext.resume();
+  }
+}
 
-  function bunyiBeep() {
 
-    if (!audioContext) return;
+// =====================================
+// SUARA BEEP SCANNER KASIR
+// =====================================
 
-    if (audioContext.state === 'suspended') {
-      audioContext.resume().then(bunyiBeep);
-      return;
-    }
+function bunyiBeep() {
 
-    const oscillator = audioContext.createOscillator();
-    const gain = audioContext.createGain();
+  if (!audioContext) return;
 
-    oscillator.type = 'sine';
-    oscillator.frequency.value = 1200;
-
-    gain.gain.setValueAtTime(
-      0.0001,
-      audioContext.currentTime
-    );
-
-    gain.gain.exponentialRampToValueAtTime(
-      0.3,
-      audioContext.currentTime + 0.01
-    );
-
-    gain.gain.exponentialRampToValueAtTime(
-      0.0001,
-      audioContext.currentTime + 0.15
-    );
-
-    oscillator.connect(gain);
-    gain.connect(audioContext.destination);
-
-    oscillator.start();
-    oscillator.stop(audioContext.currentTime + 0.16);
+  if (audioContext.state === 'suspended') {
+    audioContext.resume().then(bunyiBeep);
+    return;
   }
 
+  const oscillator = audioContext.createOscillator();
+  const gain = audioContext.createGain();
 
-  // =====================================
-  // TAMPILAN STATUS
-  // =====================================
+  // Suara tajam seperti scanner kasir
+  oscillator.type = 'square';
 
-  function tampilStatus(pesan, warna) {
+  oscillator.frequency.setValueAtTime(
+    2000,
+    audioContext.currentTime
+  );
 
-    statusBox.textContent = pesan;
-    statusBox.style.background = warna || '#eee';
+  // Volume suara
+  gain.gain.setValueAtTime(
+    0.0001,
+    audioContext.currentTime
+  );
 
-  }
+  gain.gain.exponentialRampToValueAtTime(
+    0.85,
+    audioContext.currentTime + 0.005
+  );
 
+  gain.gain.setValueAtTime(
+    0.85,
+    audioContext.currentTime + 0.075
+  );
 
-  // =====================================
-  // MENGIRIM BARCODE KE GOOGLE SHEETS
-  // =====================================
+  gain.gain.exponentialRampToValueAtTime(
+    0.0001,
+    audioContext.currentTime + 0.12
+  );
 
-  function kirimKeSheet(barcode) {
+  oscillator.connect(gain);
+  gain.connect(audioContext.destination);
 
-    barcode = String(barcode || '').trim();
+  oscillator.start();
 
-    if (!barcode || sedangMengirim) return;
+  oscillator.stop(
+    audioContext.currentTime + 0.125
+  );
 
-    sedangMengirim = true;
+}
 
-    tampilStatus(
-      'Mengirim barcode: ' + barcode,
-      '#fff3cd'
-    );
 
-    const callbackName =
-      'barcodeCallback_' +
-      Date.now() + '_' +
-      Math.floor(Math.random() * 100000);
+// =====================================
+// TAMPILAN STATUS
+// =====================================
 
-    const params = new URLSearchParams({
+function tampilStatus(pesan, warna) {
 
-      action: 'scan',
-      barcode: barcode,
-      key: API_KEY,
-      callback: callbackName
+  statusBox.textContent = pesan;
+  statusBox.style.background = warna || '#eee';
 
-    });
+}
 
-    const script = document.createElement('script');
 
-    let selesai = false;
+// =====================================
+// MENGIRIM BARCODE KE GOOGLE SHEETS
+// =====================================
 
-    function bersihkan() {
+function kirimKeSheet(barcode) {
 
-      selesai = true;
+  barcode = String(barcode || '').trim();
 
-      delete window[callbackName];
+  if (!barcode || sedangMengirim) return;
 
-      script.remove();
+  sedangMengirim = true;
 
-      sedangMengirim = false;
+  tampilStatus(
+    'Mengirim barcode: ' + barcode,
+    '#fff3cd'
+  );
 
-      // Kamera dilanjutkan setelah proses pengiriman selesai
-      if (kameraAktif && scanner) {
+  const callbackName =
+    'barcodeCallback_' +
+    Date.now() + '_' +
+    Math.floor(Math.random() * 100000);
 
-        scanner.resume().catch(function(error) {
-          console.log('Gagal melanjutkan kamera:', error);
-        });
+  const params = new URLSearchParams({
 
-      } else {
-
-        input.focus();
-
-      }
-
-    }
-
-
-    window[callbackName] = function(hasil) {
-
-      if (selesai) return;
-
-      if (hasil.success) {
-
-        // BUNYI BEEP SETELAH BERHASIL
-        bunyiBeep();
-
-        tampilStatus(
-          'BERHASIL! Barcode ' +
-          hasil.barcode +
-          ' masuk ke baris ' +
-          hasil.row,
-          '#d1e7dd'
-        );
-
-        input.value = '';
-
-      } else {
-
-        tampilStatus(
-          'GAGAL: ' + hasil.message,
-          '#f8d7da'
-        );
-
-      }
-
-      bersihkan();
-
-    };
-
-
-    script.onerror = function() {
-
-      if (selesai) return;
-
-      tampilStatus(
-        'Gagal menghubungi Google Apps Script.',
-        '#f8d7da'
-      );
-
-      bersihkan();
-
-    };
-
-
-    script.src = API_URL + '?' + params.toString();
-
-    document.body.appendChild(script);
-
-
-    // BATAS WAKTU PENGIRIMAN
-    setTimeout(function() {
-
-      if (selesai) return;
-
-      tampilStatus(
-        'Waktu pengiriman habis. Periksa koneksi internet.',
-        '#f8d7da'
-      );
-
-      bersihkan();
-
-    }, 20000);
-
-  }
-
-
-  // =====================================
-  // SCANNER USB / BLUETOOTH
-  // =====================================
-
-  input.addEventListener('keydown', function(e) {
-
-    if (e.key === 'Enter') {
-
-      e.preventDefault();
-
-      siapkanAudio();
-
-      kirimKeSheet(input.value);
-
-    }
+    action: 'scan',
+    barcode: barcode,
+    key: API_KEY,
+    callback: callbackName
 
   });
 
+  const script = document.createElement('script');
 
-  // =====================================
-  // SCANNER KAMERA HP
-  // =====================================
+  let selesai = false;
 
-  async function mulaiKamera() {
+  function bersihkan() {
 
-    if (kameraAktif) return;
+    selesai = true;
 
-    siapkanAudio();
+    delete window[callbackName];
 
-    if (!window.Html5Qrcode) {
+    script.remove();
 
-      tampilStatus(
-        'Library scanner gagal dimuat. Periksa internet.',
-        '#f8d7da'
-      );
+    sedangMengirim = false;
 
-      return;
+    // Lanjutkan kamera setelah pengiriman selesai
+    if (kameraAktif && scanner) {
+
+      scanner.resume().catch(function(error) {
+        console.log('Gagal melanjutkan kamera:', error);
+      });
+
+    } else {
+
+      input.focus();
 
     }
 
-    try {
+  }
 
-      scanner = new Html5Qrcode('reader');
 
-      await scanner.start(
+  window[callbackName] = function(hasil) {
 
-        { facingMode: 'environment' },
+    if (selesai) return;
 
-        {
-          fps: 10,
-          qrbox: {
-            width: 250,
-            height: 150
-          }
-        },
+    if (hasil.success) {
 
-        async function(barcode) {
-
-          const sekarang = Date.now();
-
-          if (sedangMengirim) return;
-
-          // MENCEGAH SCAN BERULANG
-          if (
-            barcode === barcodeTerakhir &&
-            sekarang - waktuScanTerakhir < 1500
-          ) {
-
-            return;
-
-          }
-
-          barcodeTerakhir = barcode;
-
-          waktuScanTerakhir = sekarang;
-
-          try {
-
-            await scanner.pause(true);
-
-          } catch (error) {}
-
-          kirimKeSheet(barcode);
-
-        }
-
-      );
-
-      kameraAktif = true;
-
-      document.getElementById('cameraButton').style.display = 'none';
-
-      document.getElementById('stopButton').style.display = 'block';
+      // BUNYI KETIKA BARCODE BERHASIL DISIMPAN
+      bunyiBeep();
 
       tampilStatus(
-        'Kamera aktif. Arahkan ke barcode.',
+        'BERHASIL! Barcode ' +
+        hasil.barcode +
+        ' masuk ke baris ' +
+        hasil.row,
         '#d1e7dd'
       );
 
-    } catch (error) {
+      input.value = '';
 
-      scanner = null;
-
-      kameraAktif = false;
+    } else {
 
       tampilStatus(
-        'Kamera gagal dibuka: ' + error,
+        'GAGAL: ' + hasil.message,
         '#f8d7da'
       );
 
     }
 
+    bersihkan();
+
+  };
+
+
+  script.onerror = function() {
+
+    if (selesai) return;
+
+    tampilStatus(
+      'Gagal menghubungi Google Apps Script.',
+      '#f8d7da'
+    );
+
+    bersihkan();
+
+  };
+
+
+  script.src = API_URL + '?' + params.toString();
+
+  document.body.appendChild(script);
+
+
+  // BATAS WAKTU PENGIRIMAN
+  setTimeout(function() {
+
+    if (selesai) return;
+
+    tampilStatus(
+      'Waktu pengiriman habis. Periksa koneksi internet.',
+      '#f8d7da'
+    );
+
+    bersihkan();
+
+  }, 20000);
+
+}
+
+
+// =====================================
+// SCANNER USB / BLUETOOTH
+// =====================================
+
+input.addEventListener('keydown', function(e) {
+
+  if (e.key === 'Enter') {
+
+    e.preventDefault();
+
+    siapkanAudio();
+
+    kirimKeSheet(input.value);
+
   }
 
+});
 
-  // =====================================
-  // MENGHENTIKAN KAMERA
-  // =====================================
 
-  async function hentikanKamera() {
+// =====================================
+// SCANNER KAMERA HP
+// =====================================
 
-    if (!scanner || !kameraAktif) return;
+async function mulaiKamera() {
 
-    try {
+  if (kameraAktif) return;
 
-      await scanner.stop();
+  siapkanAudio();
 
-      scanner.clear();
+  if (!window.Html5Qrcode) {
 
-      scanner = null;
+    tampilStatus(
+      'Library scanner gagal dimuat. Periksa internet.',
+      '#f8d7da'
+    );
 
-      kameraAktif = false;
-
-      document.getElementById('cameraButton').style.display = 'block';
-
-      document.getElementById('stopButton').style.display = 'none';
-
-      tampilStatus(
-        'Kamera dihentikan.',
-        '#eee'
-      );
-
-    } catch (error) {
-
-      tampilStatus(
-        'Gagal menghentikan kamera: ' + error,
-        '#f8d7da'
-      );
-
-    }
+    return;
 
   }
 
+  try {
 
-  // =====================================
-  // FOKUS AWAL
-  // =====================================
+    scanner = new Html5Qrcode('reader');
 
-  window.addEventListener('load', function() {
+    await scanner.start(
 
-    input.focus();
+      { facingMode: 'environment' },
 
-  });
+      {
+        fps: 10,
+        qrbox: {
+          width: 250,
+          height: 150
+        }
+      },
+
+      async function(barcode) {
+
+        const sekarang = Date.now();
+
+        if (sedangMengirim) return;
+
+        // Mencegah barcode terbaca berulang
+        if (
+          barcode === barcodeTerakhir &&
+          sekarang - waktuScanTerakhir < 1500
+        ) {
+          return;
+        }
+
+        barcodeTerakhir = barcode;
+        waktuScanTerakhir = sekarang;
+
+        try {
+
+          await scanner.pause(true);
+
+        } catch (error) {}
+
+        kirimKeSheet(barcode);
+
+      }
+
+    );
+
+    kameraAktif = true;
+
+    document.getElementById('cameraButton').style.display = 'none';
+
+    document.getElementById('stopButton').style.display = 'block';
+
+    tampilStatus(
+      'Kamera aktif. Arahkan ke barcode.',
+      '#d1e7dd'
+    );
+
+  } catch (error) {
+
+    scanner = null;
+    kameraAktif = false;
+
+    tampilStatus(
+      'Kamera gagal dibuka: ' + error,
+      '#f8d7da'
+    );
+
+  }
+
+}
+
+
+// =====================================
+// MENGHENTIKAN KAMERA
+// =====================================
+
+async function hentikanKamera() {
+
+  if (!scanner || !kameraAktif) return;
+
+  try {
+
+    await scanner.stop();
+
+    scanner.clear();
+
+    scanner = null;
+    kameraAktif = false;
+
+    document.getElementById('cameraButton').style.display = 'block';
+
+    document.getElementById('stopButton').style.display = 'none';
+
+    tampilStatus(
+      'Kamera dihentikan.',
+      '#eee'
+    );
+
+  } catch (error) {
+
+    tampilStatus(
+      'Gagal menghentikan kamera: ' + error,
+      '#f8d7da'
+    );
+
+  }
+
+}
+
+
+// =====================================
+// FOKUS AWAL
+// =====================================
+
+window.addEventListener('load', function() {
+
+  input.focus();
+
+});
 
 </script>
 
