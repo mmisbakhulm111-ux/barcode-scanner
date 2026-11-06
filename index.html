@@ -1,0 +1,327 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <script src="https://unpkg.com/html5-qrcode"></script>
+
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 20px;
+      background: #f1f3f5;
+      font-family: Arial, sans-serif;
+      color: #222;
+    }
+
+    .container {
+      max-width: 450px;
+      margin: auto;
+      padding: 20px;
+      background: white;
+      border-radius: 14px;
+      box-shadow: 0 3px 12px #00000012;
+    }
+
+    h2 { text-align: center; margin-top: 0; }
+
+    .description {
+      color: #666;
+      font-size: 13px;
+      text-align: center;
+      line-height: 1.5;
+    }
+
+    #reader { width: 100%; margin: 15px auto; }
+
+    input {
+      width: 100%;
+      padding: 14px;
+      margin-top: 10px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      font-size: 17px;
+    }
+
+    button {
+      width: 100%;
+      padding: 14px;
+      margin-top: 8px;
+      border: none;
+      border-radius: 8px;
+      background: #176b3a;
+      color: white;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    button.stop { background: #b42318; }
+
+    #status {
+      margin-top: 15px;
+      padding: 13px;
+      border-radius: 8px;
+      background: #eee;
+      text-align: center;
+      font-size: 14px;
+      overflow-wrap: anywhere;
+    }
+
+    hr {
+      margin: 22px 0;
+      border: 0;
+      border-top: 1px solid #ddd;
+    }
+  </style>
+</head>
+
+<body>
+<div class="container">
+
+  <h2>BARCODE SCANNER</h2>
+
+  <p class="description">
+    Scan barcode menggunakan kamera HP atau scanner
+    USB/Bluetooth. Hasil scan otomatis masuk ke Google Sheets.
+  </p>
+
+  <button id="cameraButton" onclick="mulaiKamera()">
+    MULAI SCAN KAMERA
+  </button>
+
+  <button id="stopButton" class="stop"
+          onclick="hentikanKamera()" style="display:none">
+    HENTIKAN KAMERA
+  </button>
+
+  <div id="reader"></div>
+
+  <hr>
+
+  <b>Scanner USB / Bluetooth</b>
+
+  <input
+    type="text"
+    id="barcodeInput"
+    placeholder="Scan barcode di sini..."
+    autocomplete="off"
+  >
+
+  <div id="status">Menunggu barcode...</div>
+</div>
+
+<script>
+  // KONFIGURASI API
+  const API_URL =
+    'https://script.google.com/macros/s/AKfycbw3zh8VBi8QccfUzy_FsNzTpobIz9PvL_mhzQbxfY2SzzUN8pvr7OvpWQ3xXOwf2wrb/exec';
+
+  const API_KEY = 'GANTI_DENGAN_TOKEN_RAHASIA_32_KARAKTER';
+
+  let scanner = null;
+  let kameraAktif = false;
+  let sedangMengirim = false;
+  let barcodeTerakhir = '';
+  let waktuScanTerakhir = 0;
+
+  const input = document.getElementById('barcodeInput');
+  const statusBox = document.getElementById('status');
+
+  function tampilStatus(pesan, warna) {
+    statusBox.textContent = pesan;
+    statusBox.style.background = warna || '#eee';
+  }
+
+  // MENGIRIM BARCODE KE GOOGLE SHEETS
+  function kirimKeSheet(barcode) {
+    barcode = String(barcode || '').trim();
+
+    if (!barcode || sedangMengirim) return;
+
+    sedangMengirim = true;
+
+    tampilStatus('Mengirim barcode: ' + barcode, '#fff3cd');
+
+    const callbackName =
+      'barcodeCallback_' + Date.now() + '_' +
+      Math.floor(Math.random() * 100000);
+
+    const params = new URLSearchParams({
+      action: 'scan',
+      barcode: barcode,
+      key: API_KEY,
+      callback: callbackName
+    });
+
+    const script = document.createElement('script');
+    let selesai = false;
+
+    function bersihkan() {
+      selesai = true;
+      delete window[callbackName];
+      script.remove();
+      sedangMengirim = false;
+    }
+
+    window[callbackName] = function(hasil) {
+      if (selesai) return;
+
+      if (hasil.success) {
+        tampilStatus(
+          'BERHASIL! Barcode ' + hasil.barcode +
+          ' masuk ke baris ' + hasil.row,
+          '#d1e7dd'
+        );
+
+        input.value = '';
+      } else {
+        tampilStatus(
+          'GAGAL: ' + hasil.message,
+          '#f8d7da'
+        );
+      }
+
+      bersihkan();
+
+      if (!kameraAktif) input.focus();
+    };
+
+    script.onerror = function() {
+      if (selesai) return;
+
+      tampilStatus(
+        'Gagal menghubungi Google Apps Script.',
+        '#f8d7da'
+      );
+
+      bersihkan();
+    };
+
+    script.src = API_URL + '?' + params.toString();
+    document.body.appendChild(script);
+
+    setTimeout(function() {
+      if (selesai) return;
+
+      tampilStatus(
+        'Waktu pengiriman habis. Periksa koneksi internet.',
+        '#f8d7da'
+      );
+
+      bersihkan();
+    }, 20000);
+  }
+
+  // SCANNER USB / BLUETOOTH
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      kirimKeSheet(input.value);
+    }
+  });
+
+  // SCANNER KAMERA HP
+  async function mulaiKamera() {
+    if (kameraAktif) return;
+
+    try {
+      scanner = new Html5Qrcode('reader');
+
+      await scanner.start(
+        { facingMode: 'environment' },
+        {
+          fps: 10,
+          qrbox: { width: 250, height: 150 }
+        },
+        async function(barcode) {
+          const sekarang = Date.now();
+
+          if (sedangMengirim) return;
+
+          if (
+            barcode === barcodeTerakhir &&
+            sekarang - waktuScanTerakhir < 1500
+          ) return;
+
+          barcodeTerakhir = barcode;
+          waktuScanTerakhir = sekarang;
+
+          try {
+            await scanner.pause(true);
+          } catch (error) {}
+
+          kirimKeSheet(barcode);
+        }
+      );
+
+      kameraAktif = true;
+
+      document.getElementById('cameraButton').style.display = 'none';
+      document.getElementById('stopButton').style.display = 'block';
+
+      tampilStatus(
+        'Kamera aktif. Arahkan ke barcode.',
+        '#d1e7dd'
+      );
+
+    } catch (error) {
+      tampilStatus(
+        'Kamera gagal dibuka: ' + error,
+        '#f8d7da'
+      );
+      scanner = null;
+    }
+  }
+
+  // MENGHENTIKAN KAMERA
+  async function hentikanKamera() {
+    if (!scanner || !kameraAktif) return;
+
+    try {
+      await scanner.stop();
+      scanner.clear();
+
+      scanner = null;
+      kameraAktif = false;
+
+      document.getElementById('cameraButton').style.display = 'block';
+      document.getElementById('stopButton').style.display = 'none';
+
+      tampilStatus('Kamera dihentikan.', '#eee');
+
+    } catch (error) {
+      tampilStatus('Gagal menghentikan kamera: ' + error, '#f8d7da');
+    }
+  }
+
+  // LANJUTKAN KAMERA SETELAH PENGIRIMAN SELESAI
+  const pengirimanAsli = kirimKeSheet;
+
+  kirimKeSheet = function(barcode) {
+    if (!barcode || sedangMengirim) return;
+
+    pengirimanAsli(barcode);
+
+    const cek = setInterval(async function() {
+      if (!sedangMengirim) {
+        clearInterval(cek);
+
+        if (kameraAktif && scanner) {
+          try {
+            await scanner.resume();
+          } catch (error) {}
+        }
+      }
+    }, 200);
+  };
+
+  window.addEventListener('load', function() {
+    input.focus();
+  });
+</script>
+</body>
+</html>
